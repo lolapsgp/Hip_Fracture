@@ -1,0 +1,87 @@
+---
+title: "1_Phyloseq_object"
+author: "Lola"
+date: "7/3/2023"
+output: html_document
+---
+
+#Abrimos librerias
+```{r Librerias}
+library(phyloseq)
+library(tidyverse)
+library(vegan)
+```
+
+
+#Cargamos datos
+```{r Data}
+library(readr)
+table_w_taxonomy_7_Species_counts <- read_delim("OneDrive - Universitat de Valencia/Doctorado/Estudios/IATA/Rotura_de_cadera/table-w-taxonomy-7-Species-counts.csv", 
+    delim = ";", escape_double = FALSE, trim_ws = TRUE)
+View(table_w_taxonomy_7_Species_counts)
+
+library(readxl)
+Metadatos_Microbiota_variables_b <- read_excel("OneDrive - Universitat de Valencia/Doctorado/Estudios/IATA/Rotura_de_cadera/MetadatosClinMatriz.xlsx")
+View(Metadatos_Microbiota_variables_b)
+# Iterate through column names
+for (col in names(Metadatos_Microbiota_variables_b)) {
+  # Replace spaces in column names starting with "LT "
+  if (startsWith(col, "LT ")) {
+    new_col_name <- gsub(" ", "", col)
+    colnames(Metadatos_Microbiota_variables_b)[colnames(Metadatos_Microbiota_variables_b) == col] <- new_col_name
+  }
+}
+
+# Replace "+" with "·" and "-" with "_" in column names
+colnames(Metadatos_Microbiota_variables_b) <- gsub("\\+", "·", colnames(Metadatos_Microbiota_variables_b))
+colnames(Metadatos_Microbiota_variables_b) <- gsub("-", "_", colnames(Metadatos_Microbiota_variables_b))
+
+
+
+```
+
+#Creamos objeto phyloseq
+```{r Tax Clean}
+
+ # clean the taxonomy, Greengenes format,genus
+ tax.clean <- table_w_taxonomy_7_Species_counts %>%
+   select(`#NAME`) %>% 
+   separate(`#NAME`, c("Domain","Phylum", "Class", "Order", "Family", "Genus", "Species"), ";")
+tax.clean$Species <- sub("^__", " ", tax.clean$Species)
+# Remove prefixes from all columns except "Domain"
+tax.clean$Phylum <- gsub("^p__", "", tax.clean$Phylum)
+tax.clean$Class <- gsub("^c__", "", tax.clean$Class)
+tax.clean$Order <- gsub("^o__", "", tax.clean$Order)
+tax.clean$Family <- gsub("^f__", "", tax.clean$Family)
+tax.clean$Genus <- gsub("^g__", "", tax.clean$Genus)
+tax.clean$Species <- gsub("^s__", "", tax.clean$Species)
+
+tax.clean$Species <- sub(" ", NA, tax.clean$Species)
+tax.clean$Genus <- sub("__", NA, tax.clean$Genus)
+
+ otu <- subset(table_w_taxonomy_7_Species_counts, select = -c(`#NAME`))
+
+ OTU = otu_table(as.matrix(otu), taxa_are_rows = TRUE)
+ TAX = tax_table(as.matrix(tax.clean))
+ SAMPLE <- sample_data(Metadatos_Microbiota_variables_b)
+ 
+ #Como me daba error hetenido que especificar qué datos son qué columnas
+ rownames(SAMPLE) <-Metadatos_Microbiota_variables_b$FRC
+
+ 
+ # merge the data
+ ps <- phyloseq(OTU, TAX, SAMPLE)
+ ps
+ #Eliminamos los "__d"
+ tax.clean<-tax.clean[, colnames(tax_table(ps))] <- gsub(tax_table(ps)[, colnames(tax_table(ps))],     pattern = "[a-z]__", replacement = "")
+ saveRDS(ps, "OneDrive - Universitat de Valencia/Doctorado/Estudios/IATA/Rotura_de_cadera/output/ps.Rds")  
+
+
+#Rarefaction curve
+S <- specnumber(t(otu)) # observed number of species
+(raremax <- min(rowSums(t(otu))))
+Srare <- rarefy(t(otu), raremax)
+plot(S, Srare, xlab = "Observed No. of Species", ylab = "Rarefied No. of Species")
+abline(0, 1)
+rarecurve(t(otu_ok), step = 20, sample = raremax, col = "black", cex = 0.6)
+```

@@ -1,0 +1,167 @@
+---
+title: "7_Picrust_to_GMMs_and_MetadeconfoundR"
+author: "Lola"
+date: "2/7/2024"
+output: html_document
+---
+
+```{r libraries and data}
+library(omixerRpm)
+library(readr)
+library(tidyverse)
+## Not run: 
+# read a functional profile matrix into R or create it inside R. Please note that row.names should not be used while reading the matrix. 
+# dat <- read.table("~/Documents/Lola/CIPF_2018/Rats_HE_CCL4model/input/pred_metagenome_unstrat.tsv", header=T, sep="\t")
+# Run the module mapping on the loaded table.
+# mods <- rpm(dat, minimum.coverage=0.3, annotation = 1)
+
+# Load the mapping database (v.1.08 created by me adding modules from 104 to 109)
+#I could not load it like that so I copied the files in "/home/lginerp/R/x86_64-pc-linux-gnu-library/4.1/omixerRpm/extdata" and then:
+listDB()
+db <- loadDB("GMMs.v1.08")
+
+# alternatively run the mapping without loading the table into R.
+# Use 1 for KEGG KO annotation only or 2 for taxonomic followed by KO annotation.
+mods <- rpm("~/OneDrive - Universitat de Valencia/Doctorado/Estudios/IATA/Rotura_de_cadera/output/picrust2_out_pipeline/KO_metagenome_out/pred_metagenome_unstrat.tsv", minimum.coverage=0.3, annotation = 1, module.db = db)
+# get the name of the first predicted module
+getNames(db, mods@annotation[1,]) 
+
+GMMs<-data.frame(mods@abundance) 
+names<-as.data.frame(mods@annotation)
+rownames(GMMs)<-names$Module
+long_names<-as.data.frame(mods@db@module.names)
+GMMs$names = long_names$V2[match(rownames(GMMs),rownames(long_names))]
+
+#Write the file to a csv to save it. 
+write.csv(GMMs, file = "~/OneDrive - Universitat de Valencia/Doctorado/Estudios/IATA/Older_persons/Older_people/Fecal_samples/outputs/GMMs.csv")
+```
+
+```{r Librerias phyloseq}
+library(ggplot2)
+library(dplyr)
+library(data.table)
+library(readxl)
+library(phyloseq)
+library(vegan)
+library(microbiome)
+
+```
+
+
+
+```{r Tax Clean}
+ps <- readRDS("OneDrive - Universitat de Valencia/Doctorado/Estudios/IATA/Rotura_de_cadera/output/ps.Rds")
+metadata<-data.frame(sample_data(ps))
+# Remove the "X" at the beginning of each column name
+col_names <- names(GMMs)
+otu <- subset(GMMs, select = -c(names))
+# Extract the column names from metadata
+metadata_colnames <- rownames(metadata)
+# Subset otu to include only columns with names in metadata_colnames
+otu_subset <- otu[, metadata_colnames]
+
+# Reorder alphabetically
+otu_subset <- otu_subset[, order(colnames(otu_subset))]
+metadata <- metadata[order(rownames(metadata)), ]
+
+# Now otu_subset has columns ordered alphabetically
+# And metadata has rows ordered alphabetically
+
+OTU = otu_table(as.matrix(otu_subset), taxa_are_rows = TRUE)
+TAX = tax_table(as.matrix(long_names))
+SAMPLE <- sample_data(metadata)
+
+# merge the data
+picrust_res_h <- phyloseq(OTU, TAX, SAMPLE)
+picrust_res_h
+
+saveRDS(picrust_res_h, file = "OneDrive - Universitat de Valencia/Doctorado/Estudios/IATA/Rotura_de_cadera/output/picrust_res_h.Rds")
+```
+
+##MetadeconfoundR
+```{r MetadeconfoundR heatmaps}
+ps.rel<- microbiome::transform(picrust_res_h, "compositional")
+library(metadeconfoundR)
+library(dplyr)
+Meta_Species <- as.data.frame((otu_table(ps.rel)))
+long_names<-as.data.frame(tax_table(picrust_res_h))
+rownames(Meta_Species)= long_names$V2[match(rownames(Meta_Species),rownames(long_names))]
+Meta_Species<-t(Meta_Species)
+metadata<-data.frame(sample_data(ps.rel))
+metadata$Group <- metadata$Fractura.Caso.Control.Control
+metadata <- metadata %>%
+    mutate(Group = case_when(
+        Group == "Control" ~ "Control",
+        Group == "Fractura" ~ "Hip Fracture",
+        TRUE ~ NA_character_ # Default case
+    ))
+metadata$Fractura.Caso.Control.Control<-NULL
+group_column<-metadata$Group
+# Add the Group column as the first column
+metadata <- cbind(Group = group_column, metadata)
+
+metadata_R <- subset(metadata, select = -c(FRC))
+metadata_R <- metadata_R %>% mutate(Group = ifelse(Group=="Hip Fracture",1,0))
+metadata_R <- as.data.frame(metadata_R)
+
+# check correct ordering
+all(rownames(metadata_R) == rownames(Meta_Species))
+## [1] TRUE
+all(order(rownames(metadata_R)) == order(rownames(Meta_Species)))
+## [1] TRUE
+Meta_Species<- as.data.frame(Meta_Species)
+Output <- MetaDeconfound(featureMat = as.data.frame(Meta_Species),
+                                 metaMat = as.data.frame(metadata_R), nnodes = 4, randomVar = list("+ (1|Edad)",c("Edad")))
+
+                                 
+View(Output)
+
+
+Output1_heatmap <- BuildHeatmap(Output)
+plot(Output1_heatmap)
+saveRDS(Output_batch, "OneDrive - Universitat de Valencia/Doctorado/Estudios/IATA/Rotura_de_cadera/output/Metadec_GMMs.Rds")
+#Horizontal
+Metadec_table<-data.frame(Output1_heatmap[["data"]])
+
+Metadec_table<-Metadec_table%>%
+    mutate(metaVariable = case_when(
+        metaVariable %in% c("Leucocitos") ~ "Leukocytes",
+        metaVariable %in% c("Neutrofilos") ~ "Neutrophils",
+        metaVariable %in% c("Proteína_C_reactiva") ~ "C reactive Protein",
+        metaVariable %in% c("Hemoglobina") ~ "Haemoglobin",
+        metaVariable %in% c("Albúmina") ~ "Albumin",
+        metaVariable %in% c("Colesterol_total") ~ "Total cholesterol",
+        TRUE ~ metaVariable))
+
+ggplot(Metadec_table, aes(x = featureNames, y = metaVariable)) +
+    geom_tile(aes(fill = Ds)) +
+    scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) +
+    geom_text(aes(label = stars, colour = status), size = 8, key_glyph = "point") +
+    scale_color_manual(values = c("black", "gray22"), labels = c("Confounded", "Deconfounded")) +
+    guides(color = guide_legend(override.aes = list(shape = c(1, 8)))) +
+    theme_classic() +
+    theme(
+        axis.text.x = element_text(size = 12, angle = 45, hjust = 1, vjust = 0.999),
+        axis.text.y = element_text(size = 12, angle = 0, hjust = 1, vjust = 0.35),
+        plot.title.position = "plot",
+        plot.title = element_text(size = 14, hjust = 0),
+        plot.subtitle = element_text(size = 12)
+    ) +
+    labs(
+        title = "Significant metadata correlation heatmap",
+        subtitle = "FDR-values: < 0.001 = ***, < 0.01 = **, < 0.1 = *",
+        x = "ASVs",
+        y = "Variables",
+        fill = "Effect size", 
+        color = "Confounding status") + scale_y_discrete(limits = c("Group", "Total cholesterol", "C reactive Protein", "Albumin","Haemoglobin", "LTCD4.IL2.IFNg_", "LTCD8.IL2_IFNg_", "LTCD8.TNFa_IFNg_", "LTCD8.TNFa_IFNg.", "LTCD8.TNFa.IFNg_", "LTCD8.TNFa.IFNg."))
+
+ggsave("OneDrive - Universitat de Valencia/Doctorado/Estudios/IATA/Rotura_de_cadera/output/MetadeconfoundR_GMMs_flippled.svg", width = 12, height = 7, device = "svg")  # Adjust width and height as needed
+#Vertical
+Output_heatmap<-plot(Output1_heatmap) + theme(axis.text.y = element_text(size = 13), axis.text.x = element_text(size = 13), axis.title  = element_text(size = 14), text = element_text(size = 14), title = element_text(size = 14))
+ggsave("OneDrive - Universitat de Valencia/Doctorado/Estudios/IATA/Rotura_de_cadera/output/MetadatadeconfoundR_GMMs.svg", Output_heatmap, width = 6, height = 5, device = "svg") 
+
+
+
+```
+
+
