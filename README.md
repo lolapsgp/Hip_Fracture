@@ -18,12 +18,19 @@ This project investigates the **gut microbiome as a biomarker of fragility hip f
 ## 🗂️ Repository Structure
 
 ├── 1_Phyloseq_object.Rmd
+
 ├── 2_Alpha_and_betaDiv.Rmd
+
 ├── 2_2_AlphaDiv_gender.R
+
 ├── 3_MetadeconfoundR.Rmd
+
 ├── 4_Picrust_to_GMMs_and_MetadeconfoundR.Rmd
+
 ├── 5_Roc_curves.R
+
 ├── Supplementary_plots.R
+
 
 ## 📊 File Description
 
